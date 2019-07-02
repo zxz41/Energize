@@ -17,7 +17,7 @@ module Administration =
     [<CommandParameters(2)>]
     [<CommandPermissions(ChannelPermission.ManageRoles)>]
     [<CommandConditions(CommandCondition.AdminOnly, CommandCondition.GuildOnly)>]
-    [<Command("op", "Makes a user able or unable to use admin commands", "op <user|userid>,<0|1>")>]
+    [<Command("op", "Makes a user able or unable to use admin commands", "op <user|userid> <0|1>")>]
     let op (ctx : CommandContext) = async {
         return 
             match findUser ctx ctx.arguments.[0] true with
@@ -84,21 +84,24 @@ module Administration =
         "bots", (fun (ctx : CommandContext) -> clearCmdBase ctx ctx.arguments.[1] (fun msg -> msg.Author.IsBot));
         "raw", (fun (ctx : CommandContext) -> clearCmdBase ctx ctx.arguments.[1] (fun _ -> true));
         "user", (fun (ctx : CommandContext) ->
-            if String.IsNullOrWhiteSpace ctx.arguments.[2] then
-                [ ctx.sendWarn None "Expected a username as third argument" ]
+            if ctx.arguments.Length < 3 then
+                clearCmdBase ctx ctx.arguments.[1] (fun msg -> not msg.Author.IsBot && not msg.Author.IsWebhook)
             else
-                match findUser ctx ctx.arguments.[2] true with
-                | Some user ->
-                    clearCmdBase ctx ctx.arguments.[1] (fun msg -> msg.Author.Id.Equals(user.Id))
-                | None ->   
-                    [ ctx.sendWarn None "No user could be found for your input" ]
+                if String.IsNullOrWhiteSpace ctx.arguments.[2] then
+                    [ ctx.sendWarn None "Expected a username as 3rd argument" ]
+                else
+                    match findUser ctx ctx.arguments.[2] true with
+                    | Some user ->
+                        clearCmdBase ctx ctx.arguments.[1] (fun msg -> msg.Author.Id.Equals(user.Id))
+                    | None ->   
+                        [ ctx.sendWarn None "No user could be found for your input" ]
         );
     ]
 
     [<CommandParameters(2)>]
     [<CommandPermissions(ChannelPermission.ManageMessages)>]
     [<CommandConditions(CommandCondition.AdminOnly, CommandCondition.GuildOnly)>]
-    [<Command("clear", "Clear a specified amount of messages in the current channel", "clear <cleartype>,<amounttoremove>,<extra>")>]
+    [<Command("clear", "Clear a specified amount of messages in the current channel", "clear <cleartype> <amounttoremove> <extra>")>]
     let clear (ctx : CommandContext) = async {
         let cb = clearTypes |> List.tryFind (fun (_type, _) -> _type.Equals(ctx.arguments.[0])) 
         return

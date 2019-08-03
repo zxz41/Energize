@@ -3,16 +3,18 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 
 namespace Energize.Essentials
 {
     public enum EmbedColorType
     {
-        Good = 0,
-        Warning = 1,
-        Danger = 2,
-        Normal = 3,
+        // Normal starts from 1, Anything else is undefined
+        Normal = 1,
+        Good,
+        Warning,
+        Danger
     }
 
     public static class Extensions
@@ -80,20 +82,22 @@ namespace Energize.Essentials
             return builder;
         }
 
-        public static EmbedBuilder WithColorType(this EmbedBuilder builder, EmbedColorType colorType)
+        public static EmbedBuilder WithColorType(this EmbedBuilder builder, EmbedColorType colorType, [CallerMemberName] string caller = "")
         {
             switch(colorType)
             {
+                case EmbedColorType.Normal:
+                    return builder.WithColor(MessageSender.SColorNormal);
                 case EmbedColorType.Good:
                     return builder.WithColor(MessageSender.SColorGood);
                 case EmbedColorType.Warning:
                     return builder.WithColor(MessageSender.SColorWarning);
                 case EmbedColorType.Danger:
                     return builder.WithColor(MessageSender.SColorDanger);
-                case EmbedColorType.Normal:
-                    return builder.WithColor(MessageSender.SColorNormal);
                 default:
-                    return builder.WithColor(MessageSender.SColorNormal);
+                    Logger logger = new Logger();
+                    logger.Warning($"{caller} called EmbedBuilder with an undefined colortype! ({colorType})");
+                    return builder.WithColor(MessageSender.SColorGood);
             }
         }
 

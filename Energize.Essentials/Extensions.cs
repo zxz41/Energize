@@ -17,6 +17,21 @@ namespace Energize.Essentials
 
     public static class Extensions
     {
+        private static readonly string[] ValidExtensions = new string[]
+        {
+            "aac",
+            "flac",
+            "mov",
+            "mp3",
+            "mp4",
+            "ogg",
+            "ts",
+            "wav",
+            "webm"
+        };
+		
+        private static readonly Regex UrlExtensionRegex = new Regex(@"https?:\/\/[^\s\/]+\/[^\s\.]+\.([A-Za-z0-9]+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
         public static EmbedBuilder WithField(this EmbedBuilder builder, string title, object value, bool inline = true)
         {
             if (string.IsNullOrWhiteSpace(title)) return builder;
@@ -81,9 +96,6 @@ namespace Energize.Essentials
                     return builder.WithColor(MessageSender.SColorNormal);
             }
         }
-
-        private static readonly string[] ValidExtensions = new string[] { "mp3", "mp4", "ogg", "wav", "webm", "mov" };
-        private static readonly Regex UrlExtensionRegex = new Regex(@"https?:\/\/[^\s\/]+\/[^\s\.]+\.([A-Za-z0-9]+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         public static bool IsPlayableUrl(this string url)
         {

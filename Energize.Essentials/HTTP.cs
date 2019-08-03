@@ -9,7 +9,7 @@ namespace Energize.Essentials
 {
     public class HttpClient
     {
-        private const string UserAgent = "Energize Discord(Earu's Bot)";
+        private const string UserAgent = "Energize Service (https://energize.earu.io/)";
 
         private static async Task<string> InternalRequest(string method, string url, string body, Logger logger, string userAgent, Action<HttpWebRequest> callback = null)
         {

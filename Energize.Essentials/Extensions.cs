@@ -19,17 +19,35 @@ namespace Energize.Essentials
 
     public static class Extensions
     {
+        // NOTENOTE: Most of these extentions haven't been thoroughly tested.
         private static readonly string[] ValidExtensions = new string[]
         {
+            // Advanced Audio Coding
             "aac",
+
+            // Apple / MPEG / 3GPP container
+            "3gp", "m4a", "mp3",
+
+            // Apple container
+            "m4b", "m4p", "m4r", "m4v",
+
+            // Free Lossless Audio Codec
             "flac",
-            "mov",
-            "mp3",
-            "mp4",
-            "ogg",
-            "ts",
-            "wav",
-            "webm"
+
+            // MPEG transport stream
+            "ts", "tsa", "tsv",
+
+            // Matroska
+            "mk3d", "mka", "mks", "mkv",
+
+            // Opus / Ogg
+            "oga", "ogg", "ogm", "ogv", "ogx", "opus", "opus", "spx",
+
+            // Video formats
+            "mov", "mp4", "webm",
+
+            // Waveform Audio File
+            "wav"
         };
 		
         private static readonly Regex UrlExtensionRegex = new Regex(@"https?:\/\/[^\s\/]+\/[^\s\.]+\.([A-Za-z0-9]+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);

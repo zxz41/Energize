@@ -84,7 +84,7 @@ namespace Energize.Services.Listeners.Music
             return true;
         }
 
-        private Task<SpotifyTrack> SpotifyToTrackAsync(string url)
+        private async Task<SpotifyTrack> SpotifyToTrackAsync(string url)
         {
             if (!url.Contains("spotify")) return null;
 
@@ -94,7 +94,7 @@ namespace Energize.Services.Listeners.Music
             
             string spotifyId = match.Groups[1].Value;
             ISpotifyHandlerService spotify = this.ServiceManager.GetService<ISpotifyHandlerService>("Spotify");
-            return spotify.GetTrackAsync(spotifyId);
+            return await spotify.GetTrackAsync(spotifyId);
         }
 
         private static bool HasPlayableVideo(Embed embed)
@@ -130,6 +130,7 @@ namespace Energize.Services.Listeners.Music
 
         private async Task TryPlayUrlAsync(IMusicPlayerService music, ITextChannel textChan, IUserMessage msg, IGuildUser guser, string url)
         {
+            if (string.IsNullOrWhiteSpace(url)) return; // can be null or empty apparently
             bool played = await this.TryPlaySpotifyAsync(music, textChan, guser, url);
             if (played) return;
 
@@ -161,7 +162,7 @@ namespace Energize.Services.Listeners.Music
             }
         }
 
-        [Event("MessageReceived")]
+        [DiscordEvent("MessageReceived")]
         public async Task OnMessageReceived(SocketMessage msg)
         {
             if (!this.IsValidMessage(msg)) return;
@@ -185,7 +186,7 @@ namespace Energize.Services.Listeners.Music
             }
         }
 
-        [Event("MessageUpdated")]
+        [DiscordEvent("MessageUpdated")]
         public async Task OnMessageUpdated(Cacheable<IMessage, ulong> _, SocketMessage msg, ISocketMessageChannel __)
         {
             if (!this.IsValidMessage(msg)) return;
@@ -218,11 +219,11 @@ namespace Energize.Services.Listeners.Music
             }
         }
 
-        [Event("ReactionAdded")]
+        [DiscordEvent("ReactionAdded")]
         public async Task OnReactionAdded(Cacheable<IUserMessage, ulong> cache, ISocketMessageChannel chan, SocketReaction reaction)
             => await this.OnReaction(cache, chan, reaction);
 
-        [Event("ReactionRemoved")]
+        [DiscordEvent("ReactionRemoved")]
         public async Task OnReactionRemoved(Cacheable<IUserMessage, ulong> cache, ISocketMessageChannel chan, SocketReaction reaction)
             => await this.OnReaction(cache, chan, reaction);
 

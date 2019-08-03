@@ -116,12 +116,14 @@ namespace Energize
             try
             {
                 var obj = new { guildCount = serverCount };
-                string json = JsonPayload.Serialize(obj, this.Logger);
-                string endpoint = $"https://discord.bots.gg/api/v1/bots/{Config.Instance.Discord.BotID}/stats";
-                await HttpClient.PostAsync(endpoint, json, this.Logger, null, req => {
-                    req.Headers[System.Net.HttpRequestHeader.Authorization] = Config.Instance.Discord.BotsToken;
-                    req.ContentType = "application/json";
-                });
+                if (JsonHelper.TrySerialize(obj, this.Logger, out string json))
+                {
+                    string endpoint = $"https://discord.bots.gg/api/v1/bots/{Config.Instance.Discord.BotID}/stats";
+                    await HttpHelper.PostAsync(endpoint, json, this.Logger, null, req => {
+                        req.Headers[System.Net.HttpRequestHeader.Authorization] = Config.Instance.Discord.BotsToken;
+                        req.ContentType = "application/json";
+                    });
+                }
 
                 IDblSelfBot me = await this.DiscordBotList.GetMeAsync();
                 await me.UpdateStatsAsync(serverCount);
@@ -136,7 +138,10 @@ namespace Energize
 
         private async Task UpdateActivity()
         {
-            StreamingGame game = new StreamingGame($"{this.Prefix}help | {this.Prefix}info | {this.Prefix}docs", Config.Instance.URIs.TwitchURL);
+            StreamingGame game = Config.Instance.Maintenance
+                ? new StreamingGame("maintenance", Config.Instance.URIs.TwitchURL)
+                : new StreamingGame($"{this.Prefix}help | {this.Prefix}info | {this.Prefix}docs",
+                    Config.Instance.URIs.TwitchURL);
             await this.DiscordClient.SetActivityAsync(game);
         }
 

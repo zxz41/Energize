@@ -58,7 +58,8 @@ namespace Energize
                 this.DiscordClient.ShardReady += this.OnShardReady;
                 this.DiscordRestClient.Log += async log => this.Logger.LogTo("dnet_rest.log", log.Message);
 
-                this.DiscordBotList = new AuthDiscordBotListApi(Config.Instance.Discord.BotID, Config.Instance.Discord.BotListToken);
+                if (this.DiscordBotList != null) // HACKHACK
+                    this.DiscordBotList = new AuthDiscordBotListApi(Config.Instance.Discord.BotID, Config.Instance.Discord.BotListToken);
                 this.DisplayAsciiArt();
 
                 this.Logger.Nice("Config", ConsoleColor.Yellow, $"Environment => [ {this.Environment} ]");

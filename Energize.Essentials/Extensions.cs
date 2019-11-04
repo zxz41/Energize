@@ -67,7 +67,7 @@ namespace Energize.Essentials
             return builder;
         }
 
-        public static EmbedBuilder WithColorType(this EmbedBuilder builder, EmbedColorType colorType)
+        public static EmbedBuilder WithColorType(this EmbedBuilder builder, EmbedColorType colorType, [CallerMemberName] string caller = "")
         {
             switch(colorType)
             {
@@ -77,10 +77,11 @@ namespace Energize.Essentials
                     return builder.WithColor(MessageSender.SColorDanger);
                 case EmbedColorType.Special:
                     return builder.WithColor(MessageSender.SColorSpecial);
+                case EmbedColorType.Good:
+                    return builder;
                 default:
                     Logger logger = new Logger();
                     logger.Warning($"{caller} called EmbedBuilder with an undefined colortype! ({colorType})");
-				case EmbedColorType.Good:
                     return builder;
             }
         }

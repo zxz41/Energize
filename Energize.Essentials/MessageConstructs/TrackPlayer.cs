@@ -9,9 +9,13 @@ namespace Energize.Essentials.MessageConstructs
 {
     public class TrackPlayer
     {
+
+        private DateTime LastUpdate;
+
         public TrackPlayer(ulong guildid)
         {
             this.GuildID = guildid;
+            this.LastUpdate = DateTime.MinValue;
         }
 
         public IUserMessage Message { get; set; }
@@ -20,32 +24,33 @@ namespace Energize.Essentials.MessageConstructs
 
         private string FormattedTrack(ILavaTrack track)
         {
-            string len = (track.IsStream ? TimeSpan.Zero : track.Length).ToString(@"hh\:mm\:ss");
-            string pos = (track.IsStream ? TimeSpan.Zero : track.Position).ToString(@"hh\:mm\:ss");
+            string len, pos, line;
 
-            string line;
-            if (track.IsStream)
+            if (!track.HasLength)
             {
-                line = new string('─', 24) + "⚪";
+                len = TimeSpan.Zero.ToString(@"hh\:mm\:ss");
+                pos = len;
+                line = new string('─', 20) + "⚪";
             }
             else
             {
+                len = track.Length.ToString(@"hh\:mm\:ss");
+                pos = track.Position.ToString(@"hh\:mm\:ss");
                 double perc = (double)track.Position.Ticks / track.Length.Ticks * 100.0;
-                int circlepos = Math.Clamp((int)Math.Ceiling(25.0 / 100.0 * perc), 0, 25); //Make sure its clamped
+                int circlepos = Math.Clamp((int)Math.Ceiling(21.0 / 100.0 * perc), 0, 21); //Make sure its clamped
                 if (circlepos > 0)
-                    line = new string('─', circlepos - 1) + "⚪" + new string('─', 25 - circlepos);
+                    line = new string('─', circlepos - 1) + "⚪" + new string('─', 21 - circlepos);
                 else
-                    line = "⚪" + new string('─', 24);
+                    line = "⚪" + new string('─', 20);
             }
 
-            return $"`{len}`\n```http\n▶ {line} {pos}\n```";
+            return $"```http\n▶ {line} {pos} / {len}\n```";
         }
 
         private Embed BuildTrackEmbed(ILavaTrack track, int volume, bool paused, bool looping)
         {
             EmbedBuilder builder = new EmbedBuilder();
             builder
-                .WithColorType(EmbedColorType.Good)
                 .WithTitle(track.Title)
                 .WithField("Author", track.Author)
                 .WithField("Stream", track.IsStream)
@@ -69,7 +74,6 @@ namespace Energize.Essentials.MessageConstructs
         {
             EmbedBuilder builder = new EmbedBuilder();
             builder
-                .WithColorType(EmbedColorType.Good)
                 .WithDescription("📻 Playing radio")
                 .WithField("Genre", radio.Genre)
                 .WithField("Raw Stream", $"**{radio.StreamUrl}**")
@@ -135,6 +139,13 @@ namespace Energize.Essentials.MessageConstructs
             if (this.Message == null) return;
 
             this.Embed = this.BuildEmbed(track, volume, paused, looping);
+            if ((DateTime.Now - this.LastUpdate).TotalSeconds < 2)
+            {
+                this.LastUpdate = DateTime.Now;
+                return;
+            }
+
+            this.LastUpdate = DateTime.Now;
             await this.Message.ModifyAsync(prop => prop.Embed = this.Embed);
         }
     }

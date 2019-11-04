@@ -74,12 +74,15 @@ namespace Energize.Services.Listeners.Music
             return true;
         }
 
-        private bool IsValidMessage(IMessage msg)
+        private bool IsValidMessage(IMessage m, bool checkReactions = true)
         {
+            if (!(m is IUserMessage msg)) return false;
             if (msg.Author.IsBot || msg.Author.IsWebhook) return false;
             if (msg.Embeds.Count < 1 && msg.Attachments.Count < 1) return false;
             CommandHandlingService commands = this.ServiceManager.GetService<CommandHandlingService>("Commands");
             if (commands.IsCommandMessage(msg)) return false;
+            if (checkReactions && ((msg.Reactions.TryGetValue(Emote, out ReactionMetadata data) && !data.IsMe) || !msg.Reactions.ContainsKey(Emote)))
+                return false;
 
             return true;
         }
@@ -116,7 +119,7 @@ namespace Energize.Services.Listeners.Music
                 .WithField("Posted By", msg.Author.Mention)
                 .WithField("Error", error);
 
-            await this.MessageSender.Send(textChan, builder.Build());
+            await this.MessageSender.SendAsync(textChan, builder.Build());
         }
 
         private async Task<bool> TryPlaySpotifyAsync(IMusicPlayerService music, ITextChannel textChan, IGuildUser guser, string url)
@@ -131,6 +134,9 @@ namespace Energize.Services.Listeners.Music
         private async Task TryPlayUrlAsync(IMusicPlayerService music, ITextChannel textChan, IUserMessage msg, IGuildUser guser, string url)
         {
             if (string.IsNullOrWhiteSpace(url)) return; // can be null or empty apparently
+
+            IGuildUser botUser = await guser.Guild.GetCurrentUserAsync();
+            await msg.RemoveReactionAsync(Emote, botUser);
             bool played = await this.TryPlaySpotifyAsync(music, textChan, guser, url);
             if (played) return;
 
@@ -165,7 +171,7 @@ namespace Energize.Services.Listeners.Music
         [DiscordEvent("MessageReceived")]
         public async Task OnMessageReceived(SocketMessage msg)
         {
-            if (!this.IsValidMessage(msg)) return;
+            if (!this.IsValidMessage(msg, false)) return;
 
             if(msg.Embeds.Any(embed => IsValidUrl(embed.Url) || HasPlayableVideo(embed)) || msg.Attachments.Any(attachment => attachment.IsPlayableAttachment()))
             {
@@ -189,7 +195,7 @@ namespace Energize.Services.Listeners.Music
         [DiscordEvent("MessageUpdated")]
         public async Task OnMessageUpdated(Cacheable<IMessage, ulong> _, SocketMessage msg, ISocketMessageChannel __)
         {
-            if (!this.IsValidMessage(msg)) return;
+            if (!this.IsValidMessage(msg, false)) return;
 
             if (msg.Embeds.Any(embed => IsValidUrl(embed.Url) || HasPlayableVideo(embed)) || msg.Attachments.Any(attachment => attachment.IsPlayableAttachment()))
             {
@@ -221,10 +227,6 @@ namespace Energize.Services.Listeners.Music
 
         [DiscordEvent("ReactionAdded")]
         public async Task OnReactionAdded(Cacheable<IUserMessage, ulong> cache, ISocketMessageChannel chan, SocketReaction reaction)
-            => await this.OnReaction(cache, chan, reaction);
-
-        [DiscordEvent("ReactionRemoved")]
-        public async Task OnReactionRemoved(Cacheable<IUserMessage, ulong> cache, ISocketMessageChannel chan, SocketReaction reaction)
             => await this.OnReaction(cache, chan, reaction);
 
         private async Task OnReaction(Cacheable<IUserMessage, ulong> cache, ISocketMessageChannel chan, SocketReaction reaction)

@@ -10,12 +10,12 @@ open Discord
 open System.Threading.Tasks
 open System.Text
 open Microsoft.Data.Sqlite
-open System.IO
 open Energize.Interfaces.Services.Development
 open Energize.Interfaces.Services.Listeners
 open Energize.Commands.UserHelper
 open Discord.WebSocket
 open Energize.Commands.ImageUrlProvider
+open Energize.Essentials.Helpers
 
 [<CommandModule("Utilities")>]
 module Util =
@@ -47,7 +47,7 @@ module Util =
     let timeOut (ctx : CommandContext) = async {
         let duration = int ctx.input
         await (Task.Delay(duration * 1000))
-        return [ ctx.sendOK (Some "Time Out") (sprintf "Timed out during `%d`s" duration) ]
+        return [ ctx.sendOK (Some "timeout") (sprintf "Timed out during `%d`s" duration) ]
     }
 
     [<CommandParameters(1)>]
@@ -89,7 +89,7 @@ module Util =
     [<Command("ev", "Evals a C# string", "ev <csharpstring>")>]
     let eval (ctx : CommandContext) = async {
         let evaluator = ctx.serviceManager.GetService<ICSharpEvaluationService>("Evaluator")
-        let res = awaitResult (evaluator.Eval(ctx.input, ctx))
+        let res = awaitResult (evaluator.EvalAsync(ctx.input, ctx))
         return
             match res.ToTuple() with
             | (0, out) -> [ ctx.sendBad None out ]
@@ -97,7 +97,52 @@ module Util =
             | (_, out) -> [ ctx.sendWarn None out ]
     }
 
+    [<CommandParameters(3)>]
     [<CommandConditions(CommandCondition.DevOnly)>]
+    [<Command("mail", "Sends a mail to the given mail address with the given content and subject", "mail <mailaddress> <subject> <content>")>]
+    let mail (ctx : CommandContext) = async {
+        let mail = ctx.serviceManager.GetService<IMailingService>("Mail")
+        let adr = ctx.arguments.[0]
+        return
+            try
+                await (mail.SendMailAsync(adr, ctx.arguments.[1], ctx.arguments.[2]))
+                [ ctx.sendOK None (sprintf "Sent a mail to `%s` successfully" adr) ]
+            with ex ->
+                [ ctx.sendWarn None (sprintf "Could not send a mail to `%s`: %s" adr ex.Message)]
+    }
+
+    type CodeTabObj = { language : string; files : int; linesOfCode : int; comments : int }
+    [<CommandConditions(CommandCondition.DevOnly)>]
+    [<Command("codestats", "Gets code stats about Energize repository", "codestats <nothing>")>]
+    let codeStats (ctx : CommandContext) = async {
+        let json = awaitResult (HttpHelper.GetAsync("https://api.codetabs.com/v1/loc?github=Energizers/Energize", ctx.logger))
+        let mutable results : CodeTabObj list = [] 
+        return
+            if (JsonHelper.TryDeserialize(json, ctx.logger, &results)) then
+                match results |> List.tryFind (fun obj -> obj.language.Equals("Total")) with
+                | Some result ->
+                    let fields = [
+                        ctx.embedField "Files" result.files true
+                        ctx.embedField "Comments" result.comments true
+                        ctx.embedField "Lines of Code" result.linesOfCode true
+                    ]
+
+                    let builder = EmbedBuilder()
+                    builder
+                        .WithFields(fields)
+                        .WithAuthorNickname(ctx.message)
+                        .WithColorType(EmbedColorType.Good)
+                        .WithFooter(ctx.commandName)
+                        |> ignore
+                    [ ctx.sendEmbed (builder.Build())]
+                | None -> 
+                    [ ctx.sendWarn None "There was a problem processing the result" ]
+            else
+                [ ctx.sendWarn None "There was a problem processing the result" ]
+    }
+
+    [<CommandConditions(CommandCondition.DevOnly)>]
+    [<MaintenanceFreeCommand>]
     [<Command("restart", "Restarts the bot", "restart <nothing>")>]
     let restart (ctx : CommandContext) : Async<IUserMessage list> = async {
         let restart = ctx.serviceManager.GetService<IRestartService>("Restart")
@@ -112,15 +157,15 @@ module Util =
     let lavalink (ctx : CommandContext) = async {
         let music = ctx.serviceManager.GetService<IMusicPlayerService>("Music")
         return
-            match music.LavalinkStats with
-            | null -> [ ctx.sendWarn None "Stats not available yet" ]
-            | stats ->
+            match music.LavalinkStats |> Option.ofObj with
+            | None -> [ ctx.sendWarn None "Stats not available yet" ]
+            | Some stats ->
                 let builder = EmbedBuilder()
                 let uptime = sprintf "%dd%dh%dm" stats.Uptime.Days stats.Uptime.Hours stats.Uptime.Minutes
                 let fields = [
-                    ctx.embedField "CPU Load" (sprintf "%.2f%s" (match stats.Cpu with null -> 0.0 | _ -> stats.Cpu.LavalinkLoad * 100.0) "%") true
-                    ctx.embedField "Frames" (match stats.Frames with null -> 0 | _ -> stats.Frames.Sent) true
-                    ctx.embedField "Memory (MB)" (match stats.Memory with null -> 0L | _ -> stats.Memory.Used / 1024L / 1024L) true
+                    ctx.embedField "CPU Load" (sprintf "%.2f%s" (match stats.Cpu |> Option.ofObj with None -> 0.0 | Some cpu -> cpu.LavalinkLoad * 100.0) "%") true
+                    ctx.embedField "Frames" (match stats.Frames |> Option.ofObj with None -> 0 | Some frames -> frames.Sent) true
+                    ctx.embedField "Memory (MB)" (match stats.Memory |> Option.ofObj with None -> 0L | Some mem -> mem.Used / 1024L / 1024L) true
                     ctx.embedField "Music Players" (sprintf "Energize: `%d`\nLavalink: `%d`" music.PlayerCount stats.PlayerCount) true
                     ctx.embedField "Playing Players" (sprintf "Energize: `%d`\nLavalink: `%d`" music.PlayingPlayersCount stats.PlayingPlayers) true
                     ctx.embedField "Uptime" uptime true
@@ -246,7 +291,7 @@ module Util =
         
         let fields = [
             ctx.embedField "ID" guild.Id true
-            ctx.embedField "Owner" (match owner with null -> "Unknown" | _ -> owner.Mention) true
+            ctx.embedField "Owner" (match owner |> Option.ofObj with None -> "Unknown" | Some owner -> owner.Mention) true
             ctx.embedField "Members" guild.MemberCount true
             ctx.embedField "Region" region true
             ctx.embedField "Creation Date" createdAt true
@@ -273,7 +318,10 @@ module Util =
         let github = Config.Instance.URIs.GitHubURL
         let docs = Config.Instance.URIs.WebsiteURL
         let discord = Config.Instance.URIs.DiscordURL
-        let owner = match ctx.client.GetUser(Config.Instance.Discord.OwnerID) with null -> ctx.client.CurrentUser :> SocketUser | o -> o
+        let owner = 
+            match ctx.client.GetUser(Config.Instance.Discord.OwnerID) |> Option.ofObj with
+            | None -> ctx.client.CurrentUser :> SocketUser 
+            | Some owner -> owner
         let usercount = ctx.client.Guilds |> Seq.map (fun g -> g.Users.Count) |> Seq.sum
         let fields = [
             ctx.embedField "Name" ctx.client.CurrentUser true
@@ -308,6 +356,39 @@ module Util =
         return [ ctx.sendRaw inviteUrl ]
     }
 
+    [<CommandConditions(CommandCondition.DevOnly)>]
+    [<MaintenanceFreeCommand>]
+    [<CommandParameters(1)>]
+    [<Command("shell", "Execute a shell cmd", "cmd <bashstring>")>]
+    let shell (ctx: CommandContext) = async {
+        let parts = ctx.input.Split("\s")
+        let proc = 
+            let startInfo = ProcessStartInfo()
+            startInfo.FileName <- parts.[0]
+            startInfo.RedirectStandardError <- true
+            startInfo.RedirectStandardOutput <- true
+            if parts.Length > 1 then
+                startInfo.Arguments <- String.Join("\s", parts.[1..])
+            
+            Process.Start(startInfo) |> Option.ofObj
+        return 
+            match proc with
+            | Some proc ->
+                proc.EnableRaisingEvents <- true
+                proc.BeginOutputReadLine()
+                proc.BeginErrorReadLine()
+
+                let builder = StringBuilder()
+                proc.OutputDataReceived.Add(fun out -> builder.AppendLine(out.Data) |> ignore)
+                proc.ErrorDataReceived.Add(fun err -> builder.AppendLine(err.Data) |> ignore)
+                proc.Exited.Add(fun _ -> 
+                    let output = if builder.Length > 2000 then (sprintf "%s..." (builder.ToString())) else builder.ToString()
+                    ctx.sendRaw (sprintf "```shell\n%s```" output) |> ignore
+                )
+                [ ctx.sendOK None "Executing shell command..." ]
+            | None -> [ ctx.sendWarn None "Could not execute shell command" ]
+        }
+
     [<Command("user", "Gets information about a specific user", "user <user|userid|nothing>")>]
     let user (ctx : CommandContext) = async {
         let user =
@@ -340,7 +421,7 @@ module Util =
                     let joinedTime = if time.Length >= 7 then time.Remove(time.Length - 7) else time
                     let roleNames = guser.RoleIds |> Seq.map (fun id -> guser.Guild.GetRole(id).Name) |> Seq.toList
                     let leftRoles = match (roleNames |> Seq.length) - max with n when n < 0 -> 0 | n -> n
-                    let nick = match guser.Nickname with null -> " - " | name -> name
+                    let nick = match guser.Nickname |> Option.ofObj with None -> " - " | Some name -> name
                     let moreNames = if leftRoles > 0 then (sprintf " and %d more..." leftRoles) else String.Empty
                     let clampRoles = (if max >= roleNames.Length then roleNames.Length - 1 else max)
                     let userNames = (String.Join(", ", roleNames.[..clampRoles])) + moreNames

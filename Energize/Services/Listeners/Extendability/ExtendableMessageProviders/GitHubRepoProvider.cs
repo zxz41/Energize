@@ -1,6 +1,7 @@
 ﻿using Discord;
 using Discord.WebSocket;
 using Energize.Essentials;
+using Energize.Essentials.Helpers;
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
@@ -86,7 +87,6 @@ namespace Energize.Services.Listeners.Extendability.ExtendableMessageProviders
 
                 EmbedBuilder builder = new EmbedBuilder();
                 builder
-                    .WithColorType(EmbedColorType.Good)
                     .WithField("Owner", $"{repo.Owner.Login} ({repo.Owner.Type})")
                     .WithField("Stars", repo.StargazersCount)
                     .WithField("Forks", repo.ForksCount)
@@ -98,7 +98,7 @@ namespace Energize.Services.Listeners.Extendability.ExtendableMessageProviders
 
                 builder
                     .WithField("Default Branch", repo.DefaultBranch)
-                    .WithField("Open Issues", repo.OpenIssuesCount)
+                    .WithField("Opened Issues", repo.OpenIssuesCount)
                     .WithField("Fork", repo.IsFork)
                     .WithField("Archived", repo.IsArchived)
                     .WithField("Disabled", repo.IsDisabled)

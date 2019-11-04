@@ -13,13 +13,14 @@ namespace Energize.Essentials.MessageConstructs
         private readonly Dictionary<string, int> Choices;
         private readonly List<string> ChoiceIndexes;
         private readonly Dictionary<ulong, int> VoterIds;
+        private readonly Logger Logger;
 
         private bool IsFinished;
         private int TotalVotes;
 
         public event Action<string> VoteFinished;
 
-        public Vote(IUser author, string desc, List<string> choices)
+        public Vote(IUser author, string desc, List<string> choices, Logger logger)
         {
             this.TotalVotes = 0;
             this.Author = author;
@@ -31,6 +32,7 @@ namespace Energize.Essentials.MessageConstructs
 
             this.ChoiceIndexes = choices;
             this.VoterIds = new Dictionary<ulong, int>();
+            this.Logger = logger;
             this.IsFinished = false;
 
             this.UpdateEmbed();
@@ -44,7 +46,14 @@ namespace Energize.Essentials.MessageConstructs
             timer.Elapsed += async (sender, args) =>
             {
                 await this.EndVote();
-                this.VoteFinished?.Invoke(this.GetResult());
+                try
+                {
+                    this.VoteFinished?.Invoke(this.GetResult());
+                }
+                catch (Exception ex)
+                {
+                    this.Logger.Danger(ex);
+                }
             };
         }
 
@@ -73,7 +82,8 @@ namespace Energize.Essentials.MessageConstructs
         private void UpdateEmbed()
         {
             EmbedBuilder builder = new EmbedBuilder();
-            builder.WithColor(this.IsFinished ? new Color(0, 175, 220) : MessageSender.SColorGood);
+            if (this.IsFinished)
+                builder.WithColorType(EmbedColorType.Special);
             builder.AddField("Vote", this.Description);
             int i = 1;
             foreach ((string choice, int votes) in this.Choices)
@@ -84,7 +94,7 @@ namespace Energize.Essentials.MessageConstructs
             }
                
             builder.WithAuthor(this.Author);
-            builder.WithFooter(this.IsFinished ? "Vote results" : "Valid for 5 minutes");
+            builder.WithFooter(this.IsFinished ? "vote is over" : "valid for 5 minutes");
 
             this.VoteEmbed = builder.Build();
         }
@@ -97,9 +107,16 @@ namespace Energize.Essentials.MessageConstructs
 
         private async Task Update()
         {
-            if (this.Message == null) return;
-            this.UpdateEmbed();
-            await this.Message.ModifyAsync(prop => prop.Embed = this.VoteEmbed);
+            try
+            {
+                if (this.Message == null) return;
+                this.UpdateEmbed();
+                await this.Message.ModifyAsync(prop => prop.Embed = this.VoteEmbed);
+            } 
+            catch (Exception ex)
+            {
+                this.Logger.Danger(ex);
+            }
         }
 
         public async Task AddVote(IUser voter, int choiceindex)

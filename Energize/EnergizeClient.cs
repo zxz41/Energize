@@ -1,10 +1,10 @@
 ﻿using Discord;
-using Discord.Net;
 using Discord.Rest;
 using Discord.WebSocket;
 using DiscordBotsList.Api;
 using DiscordBotsList.Api.Objects;
 using Energize.Essentials;
+using Energize.Essentials.Helpers;
 using Energize.Services;
 using System;
 using System.Collections.Generic;
@@ -55,6 +55,7 @@ namespace Energize
                 };
 
                 this.DiscordClient.Log += async log => this.Logger.LogTo("dnet_socket.log", log.Message);
+                this.DiscordClient.ShardReady += this.OnShardReady;
                 this.DiscordRestClient.Log += async log => this.Logger.LogTo("dnet_rest.log", log.Message);
 
                 this.DiscordBotList = new AuthDiscordBotListApi(Config.Instance.Discord.BotID, Config.Instance.Discord.BotListToken);
@@ -76,6 +77,13 @@ namespace Energize
             {
                 this.Logger.Warning("No token was used! You NEED a token to connect to Discord!");
             }
+        }
+
+        private volatile int CurrentShardCount;
+        private async Task OnShardReady(DiscordSocketClient _)
+        {
+            if (this.DiscordClient.Shards.Count != ++this.CurrentShardCount) return;
+            await this.ServiceManager.OnReadyAsync();
         }
 
         private void DisplayAsciiArt()
@@ -169,28 +177,34 @@ namespace Energize
                     .WithColorType(EmbedColorType.Warning)
                     .WithFooter("event handler error");
 
-                await this.MessageSender.Send(chan, builder.Build());
+                await this.MessageSender.SendAsync(chan, builder.Build());
             }
         }
 
         private async void OnUpdateTimer(object _)
         {
-            long mb = Process.GetCurrentProcess().WorkingSet64 / 1024L / 1024L; //b to mb
-            GC.Collect();
+            try
+            {
+                long mb = Process.GetCurrentProcess().WorkingSet64 / 1024L / 1024L; //b to mb
+                GC.Collect();
 
-            (bool success, int servercount) = await this.UpdateBotWebsitesAsync();
-            string log = success
-                ? $"Collected {mb}MB of garbage, updated server count ({servercount})"
-                : $"Collected {mb}MB of garbage, did NOT update server count, API might be down";
-            this.Logger.Nice("Update", ConsoleColor.Gray, log);
+                (bool success, int servercount) = await this.UpdateBotWebsitesAsync();
+                string log = success
+                    ? $"Collected {mb}MB of garbage, updated server count ({servercount})"
+                    : $"Collected {mb}MB of garbage, did NOT update server count, API might be down";
+                this.Logger.Nice("Update", ConsoleColor.Gray, log);
 
-            await this.UpdateActivityAsync();
-            await this.NotifyCaughtExceptionsAsync();
+                await this.UpdateActivityAsync();
+                await this.NotifyCaughtExceptionsAsync();
+            }
+            catch(Exception ex)
+            {
+                this.Logger.Danger(ex);
+            }
         }
 
-        private async Task TryLoginAsync(Func<TokenType, string, bool, Task> loginFunc, TokenType tokenType, string token, int delay = 30, int times = 0)
-        {
-            await loginFunc(tokenType, token, true).ContinueWith(async t =>
+        private Task TryLoginAsync(Func<TokenType, string, bool, Task> loginFunc, TokenType tokenType, string token, int delay = 30, int times = 0)
+            => loginFunc(tokenType, token, true).ContinueWith(async t =>
             {
                 if (!t.IsFaulted) return;
                 
@@ -211,7 +225,6 @@ namespace Energize
                     await this.TryLoginAsync(loginFunc, tokenType, token, delay, times);
                 }
             });
-        }
 
         public async Task InitializeAsync()
         {

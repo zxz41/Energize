@@ -13,18 +13,21 @@ open Energize.Interfaces.Services.Senders
 open System.Web
 open System
 open SpotifyAPI.Web.Enums
+open Energize.Essentials.Helpers
 
 [<CommandModule("Music")>]
 module Voice =
-    let private ytIdRegex = Regex(@"(?:youtube(?:-nocookie)?\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})\W", RegexOptions.Compiled ||| RegexOptions.IgnoreCase)
     let private spotifyRegex = Regex(@"^(spotify:|https?:\/\/open\.spotify\.com\/)([a-z]+)(\/|:)([^:\/\s\?]+)", RegexOptions.Compiled ||| RegexOptions.IgnoreCase)
 
     let private musicAction (ctx : CommandContext) (cb : IMusicPlayerService -> IVoiceChannel -> IGuildUser -> IUserMessage list) =
         let music = ctx.serviceManager.GetService<IMusicPlayerService>("Music")
-        let guser = ctx.message.Author :?> IGuildUser
-        match guser.VoiceChannel with
-        | null -> [ ctx.sendWarn None "Not in a voice channel" ]
-        | vc -> cb music vc guser
+        let guser = try Some (ctx.message.Author :?> IGuildUser) with _ -> None
+        match guser with
+        | Some guser ->
+            match guser.VoiceChannel |> Option.ofObj with
+            | None -> [ ctx.sendWarn None "Not in a voice channel" ]
+            | Some vc -> cb music vc guser
+        | None -> [ ctx.sendWarn None "There was a problem processing your user data" ]
 
     let private handleSearchResult (music : IMusicPlayerService) (ctx : CommandContext) (res : SearchResult) (vc : IVoiceChannel) (isRadio : bool) =
         match res.LoadType with
@@ -77,7 +80,7 @@ module Voice =
                 match itemType with
                 | "track" ->
                     let track = awaitResult (spotify.GetTrackAsync(id))
-                    Some ([awaitResult (music.AddTrackAsync(vc, textChan, track))])
+                    Some ([ awaitResult (music.AddTrackAsync(vc, textChan, track)) ])
                 | "playlist" ->
                     let playlist = awaitResult (spotify.GetPlaylistAsync(id))
                     let tracks = List.ofSeq(playlist.Items) |> List.map (fun spotify -> spotify :> ILavaTrack)
@@ -129,6 +132,15 @@ module Voice =
         | _ when ctx.arguments.[0].StartsWith("spotify") -> playUrl ctx
         | _ -> cb ctx
             
+    [<MaintenanceFreeCommand>]
+    [<CommandConditions(CommandCondition.DevOnly)>]
+    [<Command("clearplayers", "Clears the non playing players", "clearplayers <nothing>")>]
+    let clearPlayers (ctx: CommandContext) = async {
+        let music = ctx.serviceManager.GetService<IMusicPlayerService>("Music")
+        await (music.DisconnectUnusedPlayersAsync())
+        return [ ctx.sendOK None "Cleared unused players" ]
+    }
+
     [<CommandConditions(CommandCondition.GuildOnly)>]
     [<Command("play", "Plays a track/stream from youtube, from a link or from a file", "play <song name|url|FILE>")>]
     let play (ctx : CommandContext) = 
@@ -149,10 +161,9 @@ module Voice =
             let textChan = ctx.message.Channel :?> ITextChannel
             let ply = awaitResult (music.ConnectAsync(vc, textChan))
             let msg = awaitResult (music.SendPlayerAsync(ply, null, ctx.message.Channel))
-            match msg with
-            | null -> 
-                [ ctx.sendOK None "Nothing is playing" ]
-            | _ -> [ msg ]
+            match msg |> Option.ofObj with
+            | Some _ -> [ ctx.sendOK None "Nothing is playing" ]
+            | None -> [ msg ]
         )
     }
 
@@ -276,9 +287,9 @@ module Voice =
         return 
             if len > 0 then
                 let paginator = ctx.serviceManager.GetService<IPaginatorSenderService>("Paginator")
-                [ awaitResult (paginator.SendPlayerPaginator(ctx.message, result.Tracks, fun track ->
+                [ awaitResult (paginator.SendPlayerPaginatorAsync(ctx.message, result.Tracks, fun track ->
                     let page = result.Tracks |> Seq.tryFindIndex (fun v -> v.Uri.Equals(track.Uri))
-                    sprintf "%s #%d out of %d results for `%s`\n%s" ctx.authorMention (page.Value + 1) len ctx.arguments.[0] (track.Uri.ToString()) 
+                    sprintf "%s #%d out of %d results for `%s`\n%s" ctx.authorMention (page.Value + 1) len ctx.input (track.Uri.ToString()) 
                 )) ]
             else
                 [ ctx.sendWarn None "Could not find any songs" ]
@@ -322,9 +333,9 @@ module Voice =
                     let len = streamUrls.Length
                     if len > 0 then
                         let paginator = ctx.serviceManager.GetService<IPaginatorSenderService>("Paginator")
-                        [ awaitResult (paginator.SendPlayerPaginator(ctx.message, streamUrls, fun streamUrl ->
+                        [ awaitResult (paginator.SendPlayerPaginatorAsync(ctx.message, streamUrls, fun streamUrl ->
                             let page = streamUrls |> List.tryFindIndex (fun url -> url.Equals(streamUrl))
-                            sprintf "%s #%d out of %d results for `%s`\n%s" ctx.authorMention (page.Value + 1) len ctx.arguments.[0] streamUrl 
+                            sprintf "%s #%d out of %d results for `%s`\n%s" ctx.authorMention (page.Value + 1) len ctx.input streamUrl 
                         )) ]
                     else
                         [ ctx.sendWarn None "Could not find any streams" ]
@@ -342,9 +353,9 @@ module Voice =
             return
                 if len > 0 then
                     let paginator = ctx.serviceManager.GetService<IPaginatorSenderService>("Paginator")
-                    [ awaitResult (paginator.SendPlayerPaginator(ctx.message, songItems, fun songItem ->
+                    [ awaitResult (paginator.SendPlayerPaginatorAsync(ctx.message, songItems, fun songItem ->
                         let page = songItems |> List.tryFindIndex (fun url -> url.Equals(songItem))
-                        sprintf "%s #%d out of %d results for `%s`\n%s" ctx.authorMention (page.Value + 1) len ctx.arguments.[0] songItem.Uri.AbsoluteUri 
+                        sprintf "%s #%d out of %d results for `%s`\n%s" ctx.authorMention (page.Value + 1) len ctx.input songItem.Uri.AbsoluteUri 
                     )) ]
                 else
                     [ ctx.sendWarn None "Could not find any songs" ]
@@ -356,10 +367,10 @@ module Voice =
         |> Map.ofSeq
 
     [<CommandParameters(1)>]
-    [<Command("radio", "Adds a radio stream of the specified genre to the track queue", "radio <genre>")>]
+    [<Command("radio", "Plays a radio stream of the specified genre", "radio <genre>")>]
     let radio (ctx : CommandContext) = async {
         return musicAction ctx (fun music vc _ ->
-            let genre = ctx.arguments.[0].ToLower().Trim()
+            let genre = ctx.input.Trim()
             let radios = toMap StaticData.Instance.RadioSources |> Map.toList
             let radioOpt = radios |> List.tryFind (fun (radioGenre, _) -> genre.Equals(radioGenre))
             match radioOpt with

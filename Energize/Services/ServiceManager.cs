@@ -121,9 +121,9 @@ namespace Energize.Services
                 eventInfo.EventHandlerType,
                 Expression.Condition(
                     Expression.And(
-                        Expression.Field(
+                        Expression.Property(
                                 Expression.Property(null, typeof(Config).GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)),
-                                typeof(Config).GetField("Maintenance", BindingFlags.Public | BindingFlags.Instance)
+                                typeof(Config).GetProperty("Maintenance", BindingFlags.Public | BindingFlags.Instance)
                             ),
                         Expression.Constant(!maintenanceImpl)
                     ),
@@ -180,6 +180,22 @@ namespace Energize.Services
                 }
             }
             catch (Exception ex)
+            {
+                this.Logger.Danger(ex);
+            }
+        }
+
+        internal async Task OnReadyAsync()
+        {
+            try
+            {
+                foreach ((string _, IService service) in this.Services)
+                {
+                    if (service.Instance != null)
+                        await service.Instance.OnReadyAsync();
+                }
+            }
+            catch(Exception ex)
             {
                 this.Logger.Danger(ex);
             }

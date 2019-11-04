@@ -43,18 +43,27 @@ namespace Energize.Services.Senders
                 await msg.AddReactionAsync(new Emoji($"{i + 1}\u20e3"));
         }
 
-        public async Task<IUserMessage> SendVote(IMessage msg, string description, IEnumerable<string> choices)
+        public async Task<IUserMessage> SendVoteAsync(IMessage msg, string description, IEnumerable<string> choices)
         {
             try
             {
-                Vote vote = new Vote(msg.Author, description, choices.ToList());
-                vote.Message = await this.MessageSender.Send(msg, vote.VoteEmbed);
+                Vote vote = new Vote(msg.Author, description, choices.ToList(), this.Logger);
+                vote.Message = await this.MessageSender.SendAsync(msg, vote.VoteEmbed);
                 vote.VoteFinished += async result =>
                 {
-                    await vote.Message.DeleteAsync();
-                    await this.MessageSender.Send(msg, vote.VoteEmbed);
-                    
-                    this.Votes.TryRemove(vote.Message.Id, out Vote _);
+                    try
+                    {
+                        await vote.Message.DeleteAsync();
+                    }
+                    catch(Exception ex)
+                    {
+                        this.Logger.Nice("Vote", ConsoleColor.Yellow, $"Could not delete a vote message: {ex.Message}");
+                    }
+                    finally
+                    {
+                        await this.MessageSender.SendAsync(msg, vote.VoteEmbed);
+                        this.Votes.TryRemove(vote.Message.Id, out Vote _);
+                    }
                 };
 
                 if (!this.Votes.TryAdd(vote.Message.Id, vote))

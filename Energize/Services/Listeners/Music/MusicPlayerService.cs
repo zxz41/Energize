@@ -1,6 +1,7 @@
 ﻿using Discord;
 using Discord.WebSocket;
 using Energize.Essentials;
+using Energize.Essentials.Helpers;
 using Energize.Essentials.MessageConstructs;
 using Energize.Essentials.TrackTypes;
 using Energize.Interfaces.Services.Database;
@@ -23,7 +24,7 @@ namespace Energize.Services.Listeners.Music
     [Service("Music")]
     public class MusicPlayerService : ServiceImplementationBase, IMusicPlayerService
     {
-        private readonly DiscordShardedClient Client;
+        private readonly DiscordShardedClient DiscordClient;
         private readonly LavaShardClient LavaClient;
         private readonly Logger Logger;
         private readonly MessageSender MessageSender;
@@ -35,7 +36,7 @@ namespace Energize.Services.Listeners.Music
         {
             this.Players = new ConcurrentDictionary<ulong, IEnergizePlayer>();
 
-            this.Client = client.DiscordClient;
+            this.DiscordClient = client.DiscordClient;
             this.Logger = client.Logger;
             this.MessageSender = client.MessageSender;
             this.ServiceManager = client.ServiceManager;
@@ -48,13 +49,13 @@ namespace Energize.Services.Listeners.Music
             this.LavaClient.OnTrackFinished += this.OnTrackFinished;
             this.LavaClient.Log += async logMsg => this.Logger.Nice("Lavalink", ConsoleColor.Magenta, logMsg.Message);
             this.LavaClient.OnPlayerUpdated += this.OnPlayerUpdated;
-            this.LavaClient.OnSocketClosed += this.OnSocketClosed;
+            //this.LavaClient.OnSocketClosed += this.OnSocketClosed;
         }
 
-        private async Task OnSocketClosed(int errorCode, string reason, bool byRemote)
+        /*private async Task OnSocketClosed(int errorCode, string reason, bool byRemote)
         {
             await this.DisconnectAllPlayersAsync("Music streaming is unavailable at the moment, disconnecting");
-            SocketChannel chan = this.Client.GetChannel(Config.Instance.Discord.BugReportChannelID);
+            SocketChannel chan = this.DiscordClient.GetChannel(Config.Instance.Discord.BugReportChannelID);
             if (chan != null)
             {
                 EmbedBuilder builder = new EmbedBuilder();
@@ -66,9 +67,9 @@ namespace Energize.Services.Listeners.Music
                     .WithColorType(EmbedColorType.Warning)
                     .WithFooter("lavalink error");
 
-                await this.MessageSender.Send(chan, builder.Build());
+                await this.MessageSender.SendAsync(chan, builder);
             }
-        }
+        }*/
 
         private async Task OnPlayerUpdated(LavaPlayer lply, ILavaTrack track, TimeSpan position)
         {
@@ -145,8 +146,11 @@ namespace Energize.Services.Listeners.Music
 
             try
             {
+                if (this.Players.TryGetValue(vc.GuildId, out IEnergizePlayer ply))
+                    await this.StopTrackAsync(ply.VoiceChannel, ply.TextChannel);
+
                 await this.LavaClient.DisconnectAsync(vc);
-                if (this.Players.TryRemove(vc.GuildId, out IEnergizePlayer ply))
+                if (this.Players.TryRemove(vc.GuildId, out ply))
                 {
                     this.Logger.Nice("MusicPlayer", ConsoleColor.Magenta, $"Disconnected from VC in guild <{vc.Guild}>");
                     ply.Disconnected = true;
@@ -184,12 +188,21 @@ namespace Energize.Services.Listeners.Music
                     if (isRestart)
                         await restart.WarnChannelAsync(ply.TextChannel, warnMsg);
                     else
-                        await this.MessageSender.Warning(ply.TextChannel, "music player", warnMsg);
+                        await this.MessageSender.SendWarningAsync(ply.TextChannel, "music player", warnMsg);
                 }
                     
             }
 
             this.Logger.Nice("MusicPlayer", ConsoleColor.Yellow, $"Disconnected {count} players");
+        }
+
+        public async Task DisconnectUnusedPlayersAsync()
+        {
+            foreach ((ulong _, IEnergizePlayer ply) in this.Players)
+            {
+                if (!ply.IsPlaying || ply.Disconnected || ply.Inactive)
+                    await this.DisconnectAsync(ply.VoiceChannel);
+            }
         }
 
         public async Task<IUserMessage> AddTrackAsync(IVoiceChannel vc, ITextChannel chan, ILavaTrack lavaTrack)
@@ -228,7 +241,7 @@ namespace Energize.Services.Listeners.Music
             {
                 return new List<IUserMessage>
                 {
-                    await this.MessageSender.Warning(chan, "music player", "The loaded playlist does not contain any tracks")
+                    await this.MessageSender.SendWarningAsync(chan, "music player", "The loaded playlist does not contain any tracks")
                 };
             }
 
@@ -239,7 +252,7 @@ namespace Energize.Services.Listeners.Music
 
                 return new List<IUserMessage>
                 {
-                    await this.MessageSender.Good(chan, "music player", $"🎶 Added `{tracks.Count}` tracks from `{name}`")
+                    await this.MessageSender.SendGoodAsync(chan, "music player", $"🎶 Added `{tracks.Count}` tracks from `{name}`")
                 };
             }
             ILavaTrack lavaTrack = tracks[0];
@@ -254,7 +267,7 @@ namespace Energize.Services.Listeners.Music
             await ply.Lavalink.PlayAsync(lavaTrack);
             return new List<IUserMessage>
             {
-                await this.MessageSender.Good(chan, "music player", $"🎶 Added `{tracks.Count}` tracks from `{name}`"),
+                await this.MessageSender.SendGoodAsync(chan, "music player", $"🎶 Added `{tracks.Count}` tracks from `{name}`"),
                 await this.SendPlayerAsync(ply, lavaTrack, chan)
             };
         }
@@ -391,7 +404,7 @@ namespace Energize.Services.Listeners.Music
             List<IQueueObject> objs = ply.Queue.Items.ToList();
             if (objs.Count > 0)
             {
-                return await paginator.SendPaginator(msg, "track queue", objs, async (obj, builder) =>
+                return await paginator.SendPaginatorAsync(msg, "track queue", objs, async (obj, builder) =>
                 {
                     int i = objs.IndexOf(obj);
                     builder.WithDescription($"🎶 Track `#{i + 1}` out of `{objs.Count}` in the queue");
@@ -418,7 +431,7 @@ namespace Energize.Services.Listeners.Music
                     }
                 });
             }
-            return await this.MessageSender.Good(msg, "track queue", "The track queue is empty");
+            return await this.MessageSender.SendGoodAsync(msg, "track queue", "The track queue is empty");
         }
 
         private async Task<Embed> GetNewTrackEmbed(ILavaTrack lavaTrack, IMessage msg = null)
@@ -432,7 +445,6 @@ namespace Energize.Services.Listeners.Music
                 builder.WithThumbnailUrl(thumbnailUrl);
             return builder
                 .WithDescription(desc)
-                .WithColorType(EmbedColorType.Good)
                 .WithFooter("music player")
                 .WithField("Title", lavaTrack.Title)
                 .WithField("Author", lavaTrack.Author)
@@ -445,14 +457,14 @@ namespace Energize.Services.Listeners.Music
         {
             Embed embed = await this.GetNewTrackEmbed(lavaTrack, msg);
 
-            return await this.MessageSender.Send(msg, embed);
+            return await this.MessageSender.SendAsync(msg, embed);
         }
 
         public async Task<IUserMessage> SendNewTrackAsync(ITextChannel chan, ILavaTrack lavaTrack)
         {
             Embed embed = await this.GetNewTrackEmbed(lavaTrack);
 
-            return await this.MessageSender.Send(chan, embed);
+            return await this.MessageSender.SendAsync(chan, embed);
         }
 
         private void AddPlayerReactions(IUserMessage msg, bool isRadio = false)
@@ -496,8 +508,9 @@ namespace Energize.Services.Listeners.Music
 
             if (obj == null) return null;
 
-            ply.TrackPlayer.Message = await this.MessageSender.Send(chan ?? ply.TextChannel, ply.TrackPlayer.Embed);
-            this.AddPlayerReactions(ply.TrackPlayer.Message, obj is RadioTrack);
+            bool isRadio = obj is RadioTrack;
+            ply.TrackPlayer.Message = await this.MessageSender.SendAsync(chan ?? ply.TextChannel, ply.TrackPlayer.Embed);
+            this.AddPlayerReactions(ply.TrackPlayer.Message, isRadio);
             return ply.TrackPlayer.Message;
         }
 
@@ -508,8 +521,8 @@ namespace Energize.Services.Listeners.Music
             if (!JsonHelper.TryDeserialize(json, this.Logger, out YoutubeRelatedVideos relatedVideos)) return null;
             if (relatedVideos == null || relatedVideos.Videos.Length == 0) return null;
             IDatabaseService dbService = this.ServiceManager.GetService<IDatabaseService>("Database");
-            using (IDatabaseContext ctx = await dbService.GetContext())
-                await ctx.Instance.SaveYoutubeVideoIds(relatedVideos.Videos.Select(vid => vid.Id));
+            using (IDatabaseContext ctx = await dbService.GetContextAsync())
+                await ctx.Instance.SaveYoutubeVideoIdsAsync(relatedVideos.Videos.Select(vid => vid.Id));
 
             List<YoutubeVideo> vids = relatedVideos.Videos.Where(vid => !vid.Id.VideoID.Equals(videoId)).ToList();
             return vids[this.Rand.Next(0, relatedVideos.Videos.Length)];
@@ -544,7 +557,7 @@ namespace Energize.Services.Listeners.Music
                 return $"https://www.youtube.com/watch?v={video.Id.VideoID}";
 
             IDatabaseService dbService = this.ServiceManager.GetService<IDatabaseService>("Database");
-            using (IDatabaseContext ctx = await dbService.GetContext())
+            using (IDatabaseContext ctx = await dbService.GetContextAsync())
             {
                 IYoutubeVideoID videoId = await ctx.Instance.GetRandomVideoIdAsync();
                 return videoId == null ? string.Empty : $"https://www.youtube.com/watch?v={videoId.VideoID.Trim()}";
@@ -569,7 +582,7 @@ namespace Energize.Services.Listeners.Music
                     await this.AddPlaylistAsync(vc, chan, res.PlaylistInfo.Name, tracks);
                     break;
                 default:
-                    await this.MessageSender.Warning(chan, "music player", "Failed to get/load the next autoplay track");
+                    await this.MessageSender.SendWarningAsync(chan, "music player", "Failed to get/load the next autoplay track");
                     break;
             }
         }
@@ -631,7 +644,7 @@ namespace Energize.Services.Listeners.Music
                 .WithField("Url", $"**{lavaTrack.Uri}**")
                 .WithField("Error", error);
 
-            await this.MessageSender.Send(ply.TextChannel, builder.Build());
+            await this.MessageSender.SendAsync(ply.TextChannel, builder.Build());
         }
 
         private delegate Task ReactionCallback(MusicPlayerService music, IEnergizePlayer ply);
@@ -707,7 +720,7 @@ namespace Energize.Services.Listeners.Music
             };
 
             this.LavaRestClient = new LavaRestClient(config);
-            await this.LavaClient.StartAsync(this.Client, config);
+            await this.LavaClient.StartAsync(this.DiscordClient, config);
         }
 
         [DiscordEvent("ReactionAdded")]
@@ -718,13 +731,8 @@ namespace Energize.Services.Listeners.Music
         public async Task OnReactionRemoved(Cacheable<IUserMessage, ulong> cache, ISocketMessageChannel chan, SocketReaction reaction)
             => await this.OnReaction(cache, chan, reaction);
 
-        private volatile int CurrentShardCount;
-        [DiscordEvent("ShardReady")]
-        public async Task OnShardReady(DiscordSocketClient _)
-        {
-            if (this.Client.Shards.Count != ++this.CurrentShardCount) return;
-            await this.StartAsync();
-        }
+        public override Task OnReadyAsync() 
+            => this.StartAsync();
 
         private static SocketVoiceChannel GetVoiceChannel(SocketUser user, SocketVoiceState oldState, SocketVoiceState newState)
         {
@@ -785,7 +793,8 @@ namespace Energize.Services.Listeners.Music
             }
         }
 
-        [DiscordEvent("ShardDisconnected")]
+        // Not needed anymore since custom player updated event is fired
+        /*[DiscordEvent("ShardDisconnected")]
         public async Task OnShardDisconnected(Exception _, DiscordSocketClient client)
         {
             int count = 0;
@@ -799,10 +808,10 @@ namespace Energize.Services.Listeners.Music
                 
                 await this.DisconnectAsync(ply.VoiceChannel);
                 if (ply.TextChannel != null)
-                    await this.MessageSender.Warning(ply.TextChannel, "music player", "There was a problem with Discord, disconnecting...");
+                    await this.MessageSender.SendWarningAsync(ply.TextChannel, "music player", "There was a problem with Discord, disconnecting...");
             }
 
             this.Logger.Nice("MusicPlayer", ConsoleColor.Yellow, $"Disconnected {count} players");
-        }
+        }*/
     }
 }

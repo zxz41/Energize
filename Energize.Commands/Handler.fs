@@ -1,8 +1,7 @@
-﻿namespace Energize.Commands
+namespace Energize.Commands
 
 open Command
 open Discord.WebSocket
-open ImageUrlProvider
 open System.Text.RegularExpressions
 open Discord
 open Cache
@@ -96,7 +95,7 @@ module CommandHandler =
                     |> Seq.groupBy (fun (_, cmd) -> cmd.moduleName) 
                     |> Seq.filter (fun (name, _) -> not (name.Equals("Deprecated"))) 
                     |> Seq.sortBy (fun (name, _) -> name)
-                [ awaitResult (paginator.SendPaginator(ctx.message, ctx.commandName, commands, Action<string * seq<string * Command>, EmbedBuilder>(fun (moduleName, cmds) builder ->
+                [ awaitResult (paginator.SendPaginatorAsync(ctx.message, ctx.commandName, commands, Action<string * seq<string * Command>, EmbedBuilder>(fun (moduleName, cmds) builder ->
                     let cmdsDisplay = 
                         cmds |> Seq.map (fun (cmdName, _) -> sprintf "`%s`" cmdName)
                     let tip = StaticData.Instance.Tips.[ctx.random.Next(0, StaticData.Instance.Tips.Count)]
@@ -185,7 +184,7 @@ module CommandHandler =
 
         match chan :> IChannel with
         | :? ITextChannel as textChan ->
-            awaitIgnore (sender.SendEmbed(textChan, builder.Build(), name, avatar))
+            awaitIgnore (sender.SendEmbedAsync(textChan, builder.Build(), name, avatar))
         | _ ->
             ctx.logger.Warning("Feedback channel wasnt a text channel?!")
 
@@ -205,12 +204,12 @@ module CommandHandler =
         return
             try
                 let chan = ctx.client.GetChannel(uint64 ctx.arguments.[0])
-                match chan with
-                | null -> 
+                match chan |> Option.ofObj with
+                | None -> 
                     [ ctx.sendWarn None "Could not find a channel for the specified ID" ]
-                | _ ->
+                | Some chan ->
                     let header = "dev message (answer with the bug or feedback commands)"
-                    awaitIgnore (ctx.messageSender.Normal(chan, header, String.Join(Config.Instance.Discord.Separator, ctx.arguments.[1..])))
+                    awaitIgnore (ctx.messageSender.SendGoodAsync(chan, header, String.Join(Config.Instance.Discord.Separator, ctx.arguments.[1..])))
                     [ ctx.sendOK None "Message sent successfully" ]
             with ex ->
                 printfn "%s" (ex.ToString())
@@ -295,18 +294,18 @@ module CommandHandler =
         | None ->
             let cache = 
                 {
+                    lastImageUrl = None
                     lastMessage = None
                     lastDeletedMessage = None
-                    lastImageUrl = None
                 }
             let newCaches = state.caches |> Map.add id cache
             handlerState <- Some { state with caches = newCaches }
             cache
 
     let private startsWithBotMention (state : CommandHandlerState) (input : string) : bool =
-        match state.client.CurrentUser with
-        | null -> false
-        | _ -> Regex.IsMatch(input,"^<@!?" + state.client.CurrentUser.Id.ToString() + ">")
+        match state.client.CurrentUser |> Option.ofObj with
+        | None -> false
+        | Some user -> Regex.IsMatch(input,"^<@!?" + user.Id.ToString() + ">")
 
     let private getPrefixLength (state : CommandHandlerState) (input : string) : int =
         if startsWithBotMention state input then
@@ -375,23 +374,25 @@ module CommandHandler =
     let private registerCmdCacheEntry (msgId : uint64) (msgs : IUserMessage list) =
         match handlerState with
         | Some state ->
+            let filterMsg msg = match msg with null -> false | _ -> true 
             let newCommandCache = 
-                let cache = (msgId, msgs |> List.filter (fun msg -> match msg with null -> false | _ -> true)) :: state.commandCache
+                let cache = (msgId, msgs |> List.filter filterMsg) :: state.commandCache
                 if cache.Length > 50 then cache.[..50] else cache
             handlerState <- Some { state with commandCache = newCommandCache }
         | None -> ()
     
     let private reportCmdError (state : CommandHandlerState) (ex : exn) (msg : SocketMessage) (cmd : Command) (input : string) =
-        let realEx = match ex.InnerException with null -> ex | exIn -> exIn
+        let realEx = match ex.InnerException |> Option.ofObj with None -> ex | Some exIn -> exIn
         state.logger.Warning(realEx.ToString())
         
         let caseId = Guid.NewGuid()
         let err = 
             (sprintf "Something went wrong when using `%s` a report has been sent.\n" cmd.name)
             + "If you wish to contact the developer use the `bug` or `feedback` commands, don't forget to mention your case id!" 
-        let msgs = [ awaitResult (state.messageSender.Warning(msg, sprintf "command error | case id: %s" (caseId.ToString()), err)) ]
+        let msgs = [ awaitResult (state.messageSender.SendWarningAsync(msg, sprintf "command error | case id: %s" (caseId.ToString()), err)) ]
         registerCmdCacheEntry msg.Id msgs
         
+#if !DEBUG 
         let args = input.Trim()
         let argDisplay = if String.IsNullOrWhiteSpace args then "none" else args
         let frame = StackTrace(realEx, true).GetFrame(0)
@@ -409,11 +410,12 @@ module CommandHandler =
             .WithFooter(source)
             .WithColorType(EmbedColorType.Warning)
             |> ignore
-        match state.client.GetChannel(Config.Instance.Discord.BugReportChannelID) with
-        | null -> ()
-        | c ->
+        match state.client.GetChannel(Config.Instance.Discord.BugReportChannelID) |> Option.ofObj with
+        | None -> ()
+        | Some c ->
             let chan = c :> IChannel :?> ITextChannel
-            awaitIgnore (state.messageSender.Send(chan, builder.Build())) 
+            awaitIgnore (state.messageSender.SendAsync(chan, builder.Build())) 
+#endif
 
     let private handleTimeOut (state : CommandHandlerState) (msg : SocketMessage) (cmd : Command) (ctx : CommandContext) : Task<Task> =
         async {
@@ -427,7 +429,7 @@ module CommandHandler =
             if not tcallback.IsCompleted then
                 let tres = awaitResult (Task.WhenAny(tcallback, Task.Delay(10000)))
                 if not tcallback.IsCompleted then
-                    awaitResult (state.messageSender.Warning(msg, "time out", sprintf "Your command `%s` is timing out!" cmd.name)) |> ignore
+                    awaitResult (state.messageSender.SendWarningAsync(msg, "time out", sprintf "Your command `%s` is timing out!" cmd.name)) |> ignore
                     state.logger.Nice("Commands", ConsoleColor.Yellow, sprintf "Time out of command <%s>" cmd.name)
                 return tres
             else
@@ -449,7 +451,7 @@ module CommandHandler =
         ctx.logger.Nice(head, color, where + cmdLog + args)
 
     let private runCmd (state : CommandHandlerState) (msg : SocketMessage) (cmd : Command) (input : string) (isPrivate : bool) =
-        await (state.messageSender.TriggerTyping(msg.Channel))
+        await (state.messageSender.TriggerTypingAsync(msg.Channel))
         let args = getCmdArgs state input
         let ctx = buildCmdContext state cmd.name msg args isPrivate
         if args.Length >= cmd.parameters then
@@ -512,17 +514,17 @@ module CommandHandler =
         | cmd when Config.Instance.Maintenance && not cmd.maintenanceFree -> () //discard
         | cmd when not (cmd.isEnabled) ->
             state.logger.Nice("Commands", ConsoleColor.Red, sprintf "%s tried to use a disabled command <%s>" author cmd.name)
-            let warnMsg = awaitResult (state.messageSender.Warning(msg, "disabled command", "This is a disabled feature for now")) 
+            let warnMsg = awaitResult (state.messageSender.SendWarningAsync(msg, "disabled command", "This is a disabled feature for now")) 
             registerCmdCacheEntry msg.Id [ warnMsg ]
         | cmd when not hasPermissions ->
             state.logger.Nice("Commands", ConsoleColor.Red, sprintf "%s tried to use a command with missing permissions <%s>" author cmd.name)
             let permDisplay = String.Join(", ", missingPerms |> List.map (fun perm -> sprintf "`%s`" (perm.ToString())))
-            let warnMsg = awaitResult (state.messageSender.Warning(msg, "missing permissions", sprintf "Missing the following permissions:\n%s" permDisplay))
+            let warnMsg = awaitResult (state.messageSender.SendWarningAsync(msg, "missing permissions", sprintf "Missing the following permissions:\n%s" permDisplay))
             registerCmdCacheEntry msg.Id [ warnMsg ]
         | cmd when not hasConditions ->
             state.logger.Nice("Commands", ConsoleColor.Red, sprintf "%s tried to use a command with unmet conditions <%s>" author cmd.name)
             let condDisplay = String.Join(", ", missingConds |> List.map (fun cond -> sprintf "`%s`" (cond.ToString())))
-            let warnMsg = awaitResult (state.messageSender.Warning(msg, "unmet conditions", sprintf "The following conditions were not met:\n%s" condDisplay))
+            let warnMsg = awaitResult (state.messageSender.SendWarningAsync(msg, "unmet conditions", sprintf "The following conditions were not met:\n%s" condDisplay))
             registerCmdCacheEntry msg.Id [ warnMsg ]
         | cmd ->
             runCmd state msg cmd input (Context.isPrivate msg)
@@ -533,7 +535,7 @@ module CommandHandler =
             match state.commandCache |> List.tryFind (fun (id, _) -> cmdMsgId.Equals(id)) with
             | Some (id, msgs) -> 
                 try
-                    seq { for msg in msgs -> match msg with null -> Task.CompletedTask | _ -> msg.DeleteAsync() } 
+                    seq { for msg in msgs -> match msg |> Option.ofObj with None -> Task.CompletedTask | Some msg -> msg.DeleteAsync() } 
                     |> Task.WhenAll 
                     |> await
                 with _ -> ()
@@ -577,7 +579,7 @@ module CommandHandler =
             let helper =
                 sprintf "Hey there %s, looking for something? Use `%s` or `%s`, visit the online documentation or join our server!\n%s\n%s" 
                     msg.Author.Mention (showCmd "help") (showCmd "info") Config.Instance.URIs.WebsiteURL Config.Instance.URIs.DiscordURL
-            let helpMsg = awaitResult (state.messageSender.SendRaw(msg, helper))
+            let helpMsg = awaitResult (state.messageSender.SendRawAsync(msg, helper))
             registerCmdCacheEntry msg.Id [ helpMsg ]
         | None -> ()
 
@@ -585,7 +587,7 @@ module CommandHandler =
         match handlerState with
         | Some state when not (isBlacklisted msg.Author.Id) ->
             updateChannelCache msg (fun oldCache -> 
-                let lastUrl = match getLastImgUrl msg with Some url -> Some url | None -> oldCache.lastImageUrl
+                let lastUrl = match ImageUrlProvider.getLastImgUrl msg with Some url -> Some url | None -> oldCache.lastImageUrl
                 let lastMsg = if msg.Author.IsBot then oldCache.lastMessage else Some msg
                 { oldCache with lastImageUrl = lastUrl; lastMessage = lastMsg }
             )
@@ -599,9 +601,22 @@ module CommandHandler =
         | Some _ -> ()
         | None -> printfn "COMMAND HANDLER WAS NOT INITIALIZED ??!"
 
-    let HandleMessageUpdated _ (msg : SocketMessage) _ =
+    let private canMsgUpdate (cache : Cacheable<IMessage, uint64>) (msg : SocketMessage) (chan : ISocketMessageChannel) =
+        match chan with
+        | :? SocketGuildChannel as guildChan ->
+            let botUser = guildChan.Guild.CurrentUser
+            if botUser.GetPermissions(guildChan).Has(ChannelPermission.ReadMessageHistory) then
+                match awaitResult (cache.GetOrDownloadAsync()) |> Option.ofObj with
+                | None -> false
+                | Some oldMsg when not (oldMsg.Content.Equals(msg.Content)) -> true
+                | _ -> false
+            else
+                false
+        | _ -> true
+
+    let HandleMessageUpdated (cache : Cacheable<IMessage, uint64>) (msg : SocketMessage) (chan : ISocketMessageChannel) =
         match handlerState with
-        | Some _ when not (isBlacklisted msg.Author.Id) ->
+        | Some _ when not (isBlacklisted msg.Author.Id) && canMsgUpdate cache msg chan ->
             let diff = DateTime.Now.ToUniversalTime() - msg.Timestamp.DateTime
             if diff.TotalHours < 1.0 then
                 deleteCmdMsgs msg.Id
@@ -618,9 +633,9 @@ module CommandHandler =
     let GetRegisteredCommands (name : string) =
         match handlerState with
         | Some state -> 
-            match name with
-            | null -> state.commands |> toDictionary
-            | _ -> 
+            match name |> Option.ofObj with
+            | None -> state.commands |> toDictionary
+            | Some name -> 
                 match state.commands |> Map.tryFind name with
                 | Some cmd -> (Map.add name cmd Map.empty) |> toDictionary
                 | None -> Map.empty |> toDictionary

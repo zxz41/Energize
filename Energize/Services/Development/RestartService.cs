@@ -1,7 +1,8 @@
-﻿using Discord;
+using Discord;
 using Discord.WebSocket;
 using Energize.Essentials;
 using Energize.Interfaces.Services.Development;
+using System;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
@@ -13,6 +14,7 @@ namespace Energize.Services.Development
     public class RestartService : ServiceImplementationBase, IRestartService
     {
         private readonly ConcurrentBag<ulong> ChannelIds;
+        private readonly Logger Logger;
         private readonly MessageSender MessageSender;
         private readonly DiscordShardedClient DiscordClient;
         private readonly string LogPath;
@@ -20,6 +22,7 @@ namespace Energize.Services.Development
         public RestartService(EnergizeClient client)
         {
             this.ChannelIds = new ConcurrentBag<ulong>();
+            this.Logger = client.Logger;
             this.MessageSender = client.MessageSender;
             this.DiscordClient = client.DiscordClient;
             this.LogPath = "logs/restart.log";
@@ -41,7 +44,7 @@ namespace Energize.Services.Development
             if (!this.IsIdListed(chan.Id))
                 this.ChannelIds.Add(chan.Id);
 
-            await this.MessageSender.Warning(chan, "restart", message);
+            await this.MessageSender.SendWarningAsync(chan, "restart", message);
         }
 
         public async Task RestartAsync()
@@ -56,7 +59,7 @@ namespace Energize.Services.Development
             Process.GetCurrentProcess().Kill();
         }
 
-        public override async Task InitializeAsync()
+        public override async Task OnReadyAsync()
         {
             if (!File.Exists(this.LogPath)) return;
 
@@ -65,11 +68,16 @@ namespace Energize.Services.Development
 
             foreach(string line in lines)
             {
-                if (!ulong.TryParse(line, out ulong id)) continue;
+                if (!ulong.TryParse(line, out ulong id))
+                {
+                    this.Logger.Nice("Restart", ConsoleColor.Red, $"Could not warn channel \'{line}\' that restart is done");
+                    continue;
+                }
 
+                this.Logger.Nice("Restart", ConsoleColor.Yellow, $"Warning channel \'{id}\' that restart is finished");
                 SocketChannel chan = this.DiscordClient.GetChannel(id);
                 if (chan != null)
-                    await this.MessageSender.Good(chan, "restart", "Done restarting");
+                    await this.MessageSender.SendGoodAsync(chan, "restart", "Done restarting");
             }
         }
     }

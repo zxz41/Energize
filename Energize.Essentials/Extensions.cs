@@ -1,4 +1,5 @@
 ﻿using Discord;
+using Energize.Essentials.Helpers;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -10,48 +11,14 @@ namespace Energize.Essentials
 {
     public enum EmbedColorType
     {
-        // Normal starts from 1, Anything else is undefined
-        Normal = 1,
-        Good,
+        Good = 1,
         Warning,
-        Danger
+        Danger,
+        Special,
     }
 
     public static class Extensions
     {
-        // NOTENOTE: Most of these extentions haven't been thoroughly tested.
-        private static readonly string[] ValidExtensions = new string[]
-        {
-            // Advanced Audio Coding
-            "aac",
-
-            // Apple / MPEG / 3GPP container
-            "3gp", "m4a", "mp3",
-
-            // Apple container
-            "m4b", "m4p", "m4r", "m4v",
-
-            // Free Lossless Audio Codec
-            "flac",
-
-            // MPEG transport stream
-            "ts", "tsa", "tsv",
-
-            // Matroska
-            "mk3d", "mka", "mks", "mkv",
-
-            // Opus / Ogg
-            "oga", "ogg", "ogm", "ogv", "ogx", "opus", "opus", "spx",
-
-            // Video formats
-            "mov", "mp4", "webm",
-
-            // Waveform Audio File
-            "wav"
-        };
-		
-        private static readonly Regex UrlExtensionRegex = new Regex(@"https?:\/\/[^\s\/]+\/[^\s\.]+\.([A-Za-z0-9]+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
         public static EmbedBuilder WithField(this EmbedBuilder builder, string title, object value, bool inline = true)
         {
             if (string.IsNullOrWhiteSpace(title)) return builder;
@@ -100,24 +67,55 @@ namespace Energize.Essentials
             return builder;
         }
 
-        public static EmbedBuilder WithColorType(this EmbedBuilder builder, EmbedColorType colorType, [CallerMemberName] string caller = "")
+        public static EmbedBuilder WithColorType(this EmbedBuilder builder, EmbedColorType colorType)
         {
             switch(colorType)
             {
-                case EmbedColorType.Normal:
-                    return builder.WithColor(MessageSender.SColorNormal);
-                case EmbedColorType.Good:
-                    return builder.WithColor(MessageSender.SColorGood);
                 case EmbedColorType.Warning:
                     return builder.WithColor(MessageSender.SColorWarning);
                 case EmbedColorType.Danger:
                     return builder.WithColor(MessageSender.SColorDanger);
+                case EmbedColorType.Special:
+                    return builder.WithColor(MessageSender.SColorSpecial);
                 default:
                     Logger logger = new Logger();
                     logger.Warning($"{caller} called EmbedBuilder with an undefined colortype! ({colorType})");
-                    return builder.WithColor(MessageSender.SColorGood);
+				case EmbedColorType.Good:
+                    return builder;
             }
         }
+
+        private static readonly string[] ValidExtensions = new string[]
+        {
+            // Advanced Audio Coding
+            "aac",
+
+            // Apple / MPEG / 3GPP container
+            "3gp", "m4a", "mp3",
+
+            // Apple container
+            "m4b", "m4p", "m4r", "m4v",
+
+            // Free Lossless Audio Codec
+            "flac",
+
+            // MPEG transport stream
+            "ts", "tsa", "tsv",
+
+            // Matroska
+            "mk3d", "mka", "mks", "mkv",
+
+            // Opus / Ogg
+            "oga", "ogg", "ogm", "ogv", "ogx", "opus", "opus", "spx",
+
+            // Video formats
+            "mov", "mp4", "webm",
+
+            // Waveform Audio File
+            "wav"
+        };
+
+        private static readonly Regex UrlExtensionRegex = new Regex(@"https?:\/\/[^\s\/]+\/[^\s\.]+\.([A-Za-z0-9]+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         public static bool IsPlayableUrl(this string url)
         {
@@ -137,6 +135,12 @@ namespace Energize.Essentials
 
         public static bool IsPlayableAttachment(this IAttachment attachment)
             => attachment.Filename.IsPlayableUrl();
+
+        public static string Translate(this string input, string countryCode = "EN", params object[] values)
+        {
+            input = LanguageData.Instance.GetPhrase(input, countryCode);
+            return values.Length > 0 ? string.Format(input, values) : input;
+        }
 
         public static bool FuzzyMatch(this string stringToSearch, string pattern, out int outScore)
         {
